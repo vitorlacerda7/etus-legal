@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function role() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isLider() { return isSignedIn() && role() == 'juridico_lider'; }
+    function isAnalista() { return isSignedIn() && role() == 'juridico_analista'; }
+    function isSolicitante() { return isSignedIn() && role() == 'solicitante'; }
+    function isBlocked(uid) {
+      return exists(/databases/$(database)/documents/blocked_users/$(uid));
+    }
+
+    // Users
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == uid && !isBlocked(uid);
+      allow update: if (request.auth.uid == uid &&
+                        request.resource.data.role == resource.data.role) || isLider();
+      allow delete: if isLider();
+    }
+
+    // Blocked users
+    match /blocked_users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isLider());
+      allow write: if isLider();
+    }
+
+    // Contratos
+    match /contratos/{id} {
+      allow read: if isLider() || isAnalista();
+      allow write: if isLider() || isAnalista();
+    }
+
+    // Processos Judiciais
+    match /processos/{id} {
+      allow read: if isLider() || isAnalista();
+      allow write: if isLider() || isAnalista();
+    }
+
+    // Demandas / Solicitações
+    match /demandas/{id} {
+      allow read: if isLider() || isAnalista() ||
+                     (isSolicitante() && resource.data.solicitanteUid == request.auth.uid);
+      allow create: if isSignedIn() &&
+                       request.resource.data.solicitanteUid == request.auth.uid;
+      allow update, delete: if isLider() || isAnalista() ||
+                              (isSolicitante() && resource.data.solicitanteUid == request.auth.uid);
+    }
+
+    // Espaço Seguro (Canal de Compliance)
+    match /espacoSeguro/{id} {
+      allow create: if isSignedIn();
+      allow read: if isLider() || isAnalista();
+      allow update, delete: if isLider();
+    }
+
+    // LGPD / Compliance
+    match /incidentesLgpd/{id} {
+      allow read, write: if isLider() || isAnalista();
+    }
+
+    match /inventarioDados/{id} {
+      allow read, write: if isLider() || isAnalista();
+    }
+
+    match /templatesLgpd/{id} {
+      allow read, write: if isLider() || isAnalista();
+    }
+  }
+}
